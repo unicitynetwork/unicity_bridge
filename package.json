@@ -1,0 +1,33 @@
+{
+    "name": "btc-commitment-tools",
+    "version": "1.0.0",
+    "description": "Tools for creating and verifying Bitcoin address commitments from strings",
+    "main": "btc-commitment-lib.js",
+    "bin": {
+      "btc-commit": "./btc-commitment-cli.js"
+    },
+    "scripts": {
+      "start": "node btc-commitment-cli.js",
+      "build:web": "webpack --mode production",
+      "dev": "webpack serve --open --mode development"
+    },
+    "keywords": [
+      "bitcoin",
+      "commitment",
+      "cryptography",
+      "privacy"
+    ],
+    "author": "",
+    "license": "MIT",
+    "dependencies": {
+      "bs58": "^5.0.0"
+    },
+    "devDependencies": {
+      "css-loader": "^6.7.3",
+      "html-webpack-plugin": "^5.5.0",
+      "style-loader": "^3.3.1",
+      "webpack": "^5.75.0",
+      "webpack-cli": "^5.0.1",
+      "webpack-dev-server": "^4.11.1"
+    }
+  }
