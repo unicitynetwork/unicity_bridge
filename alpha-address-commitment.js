@@ -1,8 +1,8 @@
 /**
- * Bitcoin String Commitment Library
+ * Bitcoin String Commitment Library with Provably Unspendable Addresses
  * 
- * This library provides functionality to create non-spendable Bitcoin addresses
- * from input strings and verify that a given Bitcoin address was derived
+ * This library provides functionality to create provably unspendable Bitcoin addresses
+ * from input strings and verify that a given address was derived
  * from a specific input string.
  */
 
@@ -10,10 +10,10 @@ const crypto = require('crypto');
 const bs58 = require('bs58');
 
 /**
- * Creates a non-spendable Bitcoin address derived from an input string.
+ * Creates a provably unspendable Bitcoin address derived from an input string.
  * 
- * @param {string} inputString - The secret string to commit to
- * @returns {object} Object containing the Bitcoin address and intermediate hash
+ * @param {string} inputString - The string to commit to
+ * @returns {object} Object containing the unspendable address and verification data
  */
 function generateBitcoinAddress(inputString) {
   // Create a SHA-256 hash of the input string
@@ -21,14 +21,34 @@ function generateBitcoinAddress(inputString) {
     .update(inputString)
     .digest();
   
-  // Use the first 20 bytes of the hash as a RIPEMD-160 equivalent
-  // This creates a public key hash format compatible with Bitcoin addresses
-  const publicKeyHash = stringHash.slice(0, 20);
+  // Create a provably unspendable OP_RETURN script with the hash
+  // Format: OP_RETURN <data>
+  const dataToStore = Buffer.concat([
+    Buffer.from('UNSPENDABLE:'),
+    stringHash
+  ]);
   
-  // Add version byte (0x00 for mainnet Bitcoin addresses)
+  const opReturnScript = Buffer.concat([
+    Buffer.from('6a', 'hex'),     // OP_RETURN
+    Buffer.from([dataToStore.length]), // Length of data
+    dataToStore
+  ]);
+  
+  // Create P2SH address from the OP_RETURN script
+  // This creates a provably unspendable address since it's invalid to spend from OP_RETURN
+  const scriptHash = crypto.createHash('sha256')
+    .update(opReturnScript)
+    .digest();
+  
+  const ripemd160Hash = crypto.createHash('ripemd160')
+    .update(scriptHash)
+    .digest();
+  
+  // Create P2SH address (Pay to Script Hash)
+  // Add version byte (0x05 for P2SH addresses)
   const versionedPayload = Buffer.concat([
-    Buffer.from([0x00]), 
-    publicKeyHash
+    Buffer.from([0x05]),  // Version byte for P2SH
+    ripemd160Hash
   ]);
   
   // Create checksum (double SHA-256, first 4 bytes)
@@ -44,12 +64,17 @@ function generateBitcoinAddress(inputString) {
   
   return {
     address: bitcoinAddress,
-    hash: stringHash.toString('hex')
+    originalHash: stringHash.toString('hex'),
+    scriptHex: opReturnScript.toString('hex'),
+    isUnspendable: true,
+    verificationMethod: "SHA-256 hash of input string embedded in OP_RETURN script, then wrapped in P2SH",
+    inputLength: inputString.length,
+    importCommand: `bitcoin-cli importaddress ${opReturnScript.toString('hex')} "Unspendable commitment: ${inputString.substring(0, 20)}..." false`
   };
 }
 
 /**
- * Verifies that a Bitcoin address was derived from a specific input string.
+ * Verifies that an unspendable Bitcoin address was derived from a specific input string.
  * 
  * @param {string} bitcoinAddress - The Bitcoin address to verify
  * @param {string} claimedString - The input string that supposedly generated the address
@@ -57,19 +82,11 @@ function generateBitcoinAddress(inputString) {
  */
 function verifyBitcoinAddress(bitcoinAddress, claimedString) {
   try {
-    // Hash the claimed string
-    const claimedHash = crypto.createHash('sha256')
-      .update(claimedString)
-      .digest();
+    // Generate the expected address from the claimed string
+    const generated = generateBitcoinAddress(claimedString);
     
-    // Decode the Bitcoin address
-    const addressBytes = bs58.decode(bitcoinAddress);
-    
-    // Extract the public key hash portion (bytes 1-21)
-    const extractedHash = addressBytes.slice(1, 21);
-    
-    // Verify that the first 20 bytes of the claimed hash match
-    return Buffer.compare(claimedHash.slice(0, 20), extractedHash) === 0;
+    // Compare the addresses
+    return generated.address === bitcoinAddress;
   } catch (error) {
     // Handle invalid Bitcoin address format
     console.error("Verification error:", error.message);
@@ -77,7 +94,34 @@ function verifyBitcoinAddress(bitcoinAddress, claimedString) {
   }
 }
 
+/**
+ * Returns technical proof of why an address is unspendable
+ * 
+ * @param {string} inputString - The original input string
+ * @returns {object} Technical proof details
+ */
+function getUnspendabilityProof(inputString) {
+  const result = generateBitcoinAddress(inputString);
+  
+  return {
+    ...result,
+    technicalProof: [
+      "Address is a Pay-to-Script-Hash (P2SH) address that resolves to an OP_RETURN script.",
+      "OP_RETURN scripts are provably unspendable in Bitcoin as they explicitly mark outputs as invalid for spending.",
+      "The unspendable script contains a hash of the original input string, allowing verification.",
+      "When attempting to spend from this address, the transaction would be rejected by Bitcoin nodes."
+    ],
+    scriptAnalysis: {
+      scriptType: "P2SH wrapping OP_RETURN",
+      scriptStart: "6a", // OP_RETURN opcode
+      inputStringHashIncluded: true,
+      bitcoinProtocolRules: "https://github.com/bitcoin/bitcoin/blob/master/src/script/interpreter.cpp#L467"
+    }
+  };
+}
+
 module.exports = {
   generateBitcoinAddress,
-  verifyBitcoinAddress
+  verifyBitcoinAddress,
+  getUnspendabilityProof
 };
